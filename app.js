@@ -12,7 +12,13 @@
    正确做法：开始时记下起点时间戳，每一帧用
        "已过去多久 = 现在的时间戳 − 起点时间戳"
    去反算应该处于哪个阶段。这样哪怕定时器被暂停 30 秒，
-   恢复后时间立刻自动对齐，误差永远只有一次 tick 的量级。
+   恢复后时间立刻自动对齐。
+
+   ---------- 为什么用 Date.now()，而不是 performance.now() ----------
+   performance.now() 精度更高、不受系统对时影响，直觉上更适合计时。
+   但 iOS 上它基于 mach_absolute_time，**设备休眠时会停止走动**：
+   锁屏那段时间会凭空消失，计时器凭空变慢 —— 正好击穿整套设计的前提。
+   训练计时器可以忍受 NTP 对时带来的几百毫秒跳动，绝不能忍受"停表"。
    ========================================================= */
 
 /* ============================================================
@@ -26,7 +32,7 @@ const PRESETS = {
   emom:    { prepare: 10, work: 40, rest: 20, rounds: 12, sets: 1, setRest: 60 },
 };
 
-/** 每个可调参数的元信息 —— 设置界面由它自动生成 */
+/** 每个可调参数的元信息 —— 设置界面和数值校验都由它驱动 */
 const FIELDS = [
   { key: 'prepare', label: '准备时间', unit: '秒', min: 0,   max: 60,  step: 5  },
   { key: 'work',    label: '工作',     unit: '秒', min: 5,   max: 300, step: 5  },
@@ -38,29 +44,44 @@ const FIELDS = [
 
 /** 各阶段的显示信息 */
 const PHASE_META = {
-  prepare: { label: '准备',   color: '#a78bfa' },
-  work:    { label: '工作',   color: '#34d399' },
-  rest:    { label: '休息',   color: '#fbbf24' },
+  prepare: { label: '准备',     color: '#a78bfa' },
+  work:    { label: '工作',     color: '#34d399' },
+  rest:    { label: '休息',     color: '#fbbf24' },
   setrest: { label: '组间休息', color: '#60a5fa' },
-  done:    { label: '完成',   color: '#34d399' },
+  done:    { label: '完成',     color: '#34d399' },
 };
 
 const STORAGE_KEY = 'hiit.config.v1';
 
+/** 把任意输入夹到合法范围；非法值（NaN、空、乱码）回落到该字段的最小值 */
+function clampField(field, raw) {
+  const n = Math.round(Number(raw));
+  if (!Number.isFinite(n)) return field.min;
+  return Math.min(field.max, Math.max(field.min, n));
+}
+
 let config = loadConfig();
 
 function loadConfig() {
+  const merged = { ...PRESETS.tabata };
+
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const saved = JSON.parse(raw);
-      // 与默认值合并，这样将来新增参数不会因为旧存档而缺失
-      return { ...PRESETS.tabata, ...saved };
-    }
+    if (raw) Object.assign(merged, JSON.parse(raw));
   } catch (err) {
     console.warn('读取本地配置失败，改用默认值', err);
   }
-  return { ...PRESETS.tabata };
+
+  // 存档可能被手改坏，也可能来自参数范围不同的旧版本，必须逐项夹回合法范围。
+  // 否则 rounds 变成 null 之类会让时间轴直接空掉，一按「开始」就跳到「完成」。
+  FIELDS.forEach(field => {
+    const ok = Number.isFinite(Math.round(Number(merged[field.key])));
+    merged[field.key] = ok
+      ? clampField(field, merged[field.key])
+      : PRESETS.tabata[field.key];
+  });
+
+  return merged;
 }
 
 function persistConfig() {
@@ -79,7 +100,7 @@ let audioCtx = null;
 
 /**
  * iOS Safari 规定：音频必须由「用户手势」触发才能播放。
- * 所以这个函数只能在点击「开始」时调用，不能在页面加载时调用。
+ * 所以这个函数只能在点击时调用，不能在页面加载时调用。
  */
 function unlockAudio() {
   if (!audioCtx) {
@@ -87,7 +108,28 @@ function unlockAudio() {
     if (!Ctx) return;                       // 浏览器不支持就静默降级
     audioCtx = new Ctx();
   }
-  if (audioCtx.state === 'suspended') audioCtx.resume();
+
+  ensureAudioAlive();
+
+  // iOS 默认把 Web Audio 归到"环境音"通道，静音拨片一拨就彻底没声音。
+  // 声明成 playback 通道才能穿透静音开关（Safari 17+）。
+  if (navigator.audioSession) {
+    try { navigator.audioSession.type = 'playback'; } catch (err) { /* 忽略 */ }
+  }
+}
+
+/**
+ * 把被打断的音频上下文救回来。
+ *
+ * iOS 在锁屏、切后台、来电之后会把 AudioContext 置成 'suspended'，
+ * 或置成 WebKit 专有的 'interrupted'。所以判断条件必须是
+ * "不等于 running" —— 只判断 suspended 会漏掉 interrupted 这种情况，
+ * 结果就是训练中途的提示音全部静音。
+ */
+function ensureAudioAlive() {
+  if (audioCtx && audioCtx.state !== 'running') {
+    audioCtx.resume().catch(() => {});
+  }
 }
 
 /**
@@ -100,6 +142,7 @@ function unlockAudio() {
  */
 function beep({ freq = 880, duration = 0.12, gain = 0.35, count = 1, gap = 0.18 } = {}) {
   if (!audioCtx) return;
+  ensureAudioAlive();
 
   const t0 = audioCtx.currentTime;
 
@@ -126,17 +169,17 @@ function beep({ freq = 880, duration = 0.12, gain = 0.35, count = 1, gap = 0.18 
     osc.stop(end + 0.02);
 
     // 播完自动断开，防止长时间训练后节点堆积
-    osc.onended = () => { try { vol.disconnect(); } catch (e) {} };
+    osc.onended = () => { try { vol.disconnect(); } catch (err) {} };
   }
 }
 
 /** 进入某个阶段时的提示音（音高不同 = 闭着眼也知道该干嘛） */
 function announcePhase(phase) {
   switch (phase) {
-    case 'prepare': beep({ freq: 784, duration: 0.12, gain: 0.30 }); break;             // 中音
-    case 'work':    beep({ freq: 1046, duration: 0.16, gain: 0.42 }); break;            // 高音 = 上！
-    case 'rest':    beep({ freq: 587, duration: 0.16, gain: 0.34 }); break;             // 低音 = 歇
-    case 'setrest': beep({ freq: 523, duration: 0.15, gain: 0.34, count: 2, gap: 0.22 }); break;
+    case 'prepare': beep({ freq: 784,  duration: 0.12, gain: 0.30 }); break;   // 中音
+    case 'work':    beep({ freq: 1046, duration: 0.16, gain: 0.42 }); break;   // 高音 = 上！
+    case 'rest':    beep({ freq: 587,  duration: 0.16, gain: 0.34 }); break;   // 低音 = 歇
+    case 'setrest': beep({ freq: 523,  duration: 0.15, gain: 0.34, count: 2, gap: 0.22 }); break;
     case 'done':    beep({ freq: 1046, duration: 0.18, gain: 0.42, count: 3, gap: 0.24 }); break;
   }
 }
@@ -150,6 +193,11 @@ function announcePhase(phase) {
  *   [ {phase:'prepare', duration:10},
  *     {phase:'work', duration:20, set:1, round:1},
  *     {phase:'rest', duration:10, set:1, round:1}, ... ]
+ *
+ * 时长为 0 的阶段会被剔除（例如把「休息」设成 0 秒）。
+ * 必须剔除，不能留着：0 长度的步骤 start === end，查找当前阶段时会被
+ * 整段跳过，于是相位索引一次跳两格，被误判成"刚从后台恢复"，
+ * 结果是每个工作段都响错提示音，提示条还会显示"下一个：休息 0 秒"。
  */
 function buildSteps(cfg) {
   const steps = [];
@@ -173,7 +221,7 @@ function buildSteps(cfg) {
     }
   }
 
-  return steps;
+  return steps.filter(step => step.duration > 0);
 }
 
 /** 给每个 step 补上累计起止时间，便于按"总秒数"直接定位 */
@@ -192,13 +240,16 @@ function buildTimeline(steps) {
 
 let timeline      = [];     // 当前时间轴
 let totalDuration = 0;      // 总时长（秒）
-let startStamp    = 0;      // performance.now() 起点
+let startStamp    = 0;      // 起点时间戳（毫秒，来自 Date.now()）
 let running       = false;
 let tickHandle    = null;
 let currentIndex  = -1;     // 当前处在时间轴的第几段
 let lastCountdown = null;   // 已经响过的倒计时秒数，避免同一秒重复响
 
 const TICK_MS = 100;        // 每 100ms 刷新一次显示；计算与它无关，只影响刷新平滑度
+
+/** 当前时间戳。包一层是为了让"计时基准"这件事只有一个出口，方便日后替换 */
+function now() { return Date.now(); }
 
 /** 取出"已过去 elapsed 秒时"应该处于哪一段 */
 function stateAt(elapsed) {
@@ -222,27 +273,27 @@ function start() {
   requestWakeLock();                              // 尽量让屏幕别熄灭
 
   prepareTimeline();
-  startStamp = performance.now();
+  startStamp = now();
+  delete els.btnStart.dataset.elapsed;            // 清掉上一轮的残留进度
   running    = true;
 
   showScreen('timer');
-  els.btnStart.hidden = true;
-  els.btnPause.hidden = false;
-  els.btnReset.hidden = true;                     // 计时中先藏起来，避免误触
-
+  setControls('running');
   startTicking();
 }
 
 function pause() {
   if (!running) return;
+
+  // 自己精确记录进度，而不是沿用上一次 tick 写下的值 ——
+  // 那个值最多可能旧 100ms，恢复时会白白丢掉这段时间
+  els.btnStart.dataset.elapsed = String((now() - startStamp) / 1000);
+
   running = false;
   stopTicking();
   releaseWakeLock();
 
-  els.btnPause.hidden = true;
-  els.btnStart.hidden = false;
-  els.btnStart.textContent = '继续';
-  els.btnReset.hidden = false;
+  setControls('paused');
 }
 
 function resume() {
@@ -251,13 +302,10 @@ function resume() {
 
   // 关键：把起点时间戳往回推，让"已过去的时间"接续原来的进度
   const elapsed = Number(els.btnStart.dataset.elapsed || 0);
-  startStamp = performance.now() - elapsed * 1000;
+  startStamp = now() - elapsed * 1000;
   running = true;
 
-  els.btnStart.hidden = true;
-  els.btnPause.hidden = false;
-  els.btnReset.hidden = true;
-
+  setControls('running');
   startTicking();
 }
 
@@ -267,12 +315,9 @@ function reset() {
   releaseWakeLock();
 
   prepareTimeline();
+  delete els.btnStart.dataset.elapsed;            // 不留过期进度，避免被错误复用
 
-  els.btnStart.hidden = false;
-  els.btnStart.textContent = '开始';
-  els.btnPause.hidden = true;
-  els.btnReset.hidden = false;
-
+  setControls('idle');
   renderIdle();
 }
 
@@ -292,7 +337,7 @@ function stopTicking() {
 function tick() {
   if (!running) return;
 
-  const elapsed = (performance.now() - startStamp) / 1000;
+  const elapsed = (now() - startStamp) / 1000;
   els.btnStart.dataset.elapsed = String(elapsed);   // 记下来，暂停后才能接续
 
   const state = stateAt(elapsed);
@@ -307,13 +352,16 @@ function tick() {
 
     if (jumped === 1) {
       announcePhase(state.step.phase);            // 正常推进：报阶段
-    } else if (jumped > 1) {
-      // 说明刚才被系统挂起了（切后台/锁屏），中间跳过了好几段。
+    } else {
+      // jumped > 1：刚从后台/锁屏回来，中间跳过了好几段。
       // 只响一声提醒"已经到这儿了"，不要补响一串音。
+      // jumped < 0：时间被往回拨过（系统对时），重新报一次当前阶段即可。
       beep({ freq: 784, duration: 0.15, gain: 0.35 });
-    }
 
-    if (state.step.phase === 'done') announcePhase('done');
+      // 如果落点正好在最后 3 秒，把倒计时标记预置好；否则这一帧会
+      // 同时响"恢复音"和"倒数音"，听起来像卡了一下
+      lastCountdown = Math.ceil(state.remaining);
+    }
   }
 
   // ---- 最后 3 秒的倒数提示音 ----
@@ -332,11 +380,8 @@ function finish() {
   releaseWakeLock();
 
   phaseDone();
-
-  els.btnStart.hidden = false;
-  els.btnStart.textContent = '再来一次';
-  els.btnPause.hidden = true;
-  els.btnReset.hidden = false;
+  announcePhase('done');      // 结束提示音：响三声
+  setControls('done');
 }
 
 /* ============================================================
@@ -347,9 +392,24 @@ let wakeLock = null;
 
 async function requestWakeLock() {
   if (!('wakeLock' in navigator)) return;           // 旧浏览器直接跳过
+
   try {
-    wakeLock = await navigator.wakeLock.request('screen');
-    wakeLock.addEventListener('release', () => { wakeLock = null; });
+    const sentinel = await navigator.wakeLock.request('screen');
+
+    // request() 是异步的。等待期间用户可能已经按了暂停或重置，
+    // 这时必须立刻把刚拿到的锁还回去，否则屏幕会一直亮着。
+    if (!running) {
+      try { sentinel.release(); } catch (err) { /* 忽略 */ }
+      return;
+    }
+
+    // 只认"自己这一把锁"的 release 事件。否则一把旧锁迟到的 release
+    // 会把新锁的引用清掉，之后 releaseWakeLock() 就再也关不掉屏幕常亮了。
+    sentinel.addEventListener('release', () => {
+      if (wakeLock === sentinel) wakeLock = null;
+    });
+    wakeLock = sentinel;
+
   } catch (err) {
     console.warn('屏幕常亮申请失败（不影响计时）', err);
   }
@@ -357,7 +417,7 @@ async function requestWakeLock() {
 
 function releaseWakeLock() {
   if (wakeLock) {
-    try { wakeLock.release(); } catch (e) {}
+    try { wakeLock.release(); } catch (err) { /* 忽略 */ }
     wakeLock = null;
   }
 }
@@ -388,9 +448,37 @@ function setAccent(color) {
   document.documentElement.style.setProperty('--accent', color);
 }
 
+/**
+ * 统一管理底部按钮的显隐和文案。
+ *
+ * 「设置」在训练中和暂停中都必须隐藏 —— 否则一个「保存」会把正在进行
+ * 的时间轴整个换掉，而起点时间戳还指向旧时间轴，计时立刻错乱；
+ * 暂停时进设置再返回，还会让界面显示"准备"、按钮却写着"继续"。
+ *
+ * @param {'idle'|'running'|'paused'|'done'} mode
+ */
+function setControls(mode) {
+  const isRunning = (mode === 'running');
+  const canEdit   = (mode === 'idle' || mode === 'done');
+
+  els.btnStart.hidden    = isRunning;
+  els.btnPause.hidden    = !isRunning;
+  els.btnReset.hidden    = isRunning;      // 计时中藏起来，避免误触
+  els.btnSettings.hidden = !canEdit;       // 见上方注释：训练中禁止改配置
+
+  els.btnStart.textContent =
+    mode === 'done'   ? '再来一次' :
+    mode === 'paused' ? '继续'     :
+                        '开始';
+
+  // 把状态存在 dataset 里，点击时据此分支 —— 比比对按钮文字可靠
+  els.btnStart.dataset.mode = mode;
+}
+
 function render(step, remaining, elapsed) {
   const meta = PHASE_META[step.phase];
   setAccent(meta.color);
+  document.body.dataset.phase = step.phase;     // 驱动整屏背景色
 
   els.phaseLabel.textContent = meta.label;
   els.countdown.textContent  = Math.ceil(remaining);
@@ -421,6 +509,8 @@ function render(step, remaining, elapsed) {
 /** 未开始 / 重置后的静态显示 */
 function renderIdle() {
   setAccent(PHASE_META.prepare.color);
+  document.body.dataset.phase = 'prepare';
+
   els.phaseLabel.textContent = '准备';
   els.countdown.textContent  = Math.ceil(config.prepare || config.work);
   els.countdown.classList.remove('urgent');
@@ -435,6 +525,8 @@ function renderIdle() {
 
 function phaseDone() {
   setAccent(PHASE_META.done.color);
+  document.body.dataset.phase = 'done';
+
   els.phaseLabel.textContent = '完成';
   els.countdown.textContent  = '🎉';
   els.countdown.classList.remove('urgent');
@@ -451,8 +543,6 @@ function showScreen(name) {
   const showTimer = (name === 'timer');
   els.screenTimer.hidden    = !showTimer;
   els.screenSettings.hidden = showTimer;
-
-  document.body.dataset.phase = showTimer ? (PHASE_META.prepare && 'prepare') : 'settings';
 }
 
 /* ============================================================
@@ -462,6 +552,7 @@ function showScreen(name) {
 let draft = null;      // 编辑中的副本，点「保存」才写回 config
 
 function openSettings() {
+  if (running) return;                   // 双保险：训练中不允许进设置
   draft = { ...config };
   renderSettings();
   showScreen('settings');
@@ -470,7 +561,6 @@ function openSettings() {
 function closeSettings() {
   draft = null;
   showScreen('timer');
-  renderIdle();
 }
 
 function renderSettings() {
@@ -482,6 +572,7 @@ function renderSettings() {
 
     const label = document.createElement('div');
     label.className = 'field-label';
+    // 这里的内容完全来自代码里写死的 FIELDS 常量，不含任何用户输入，无注入风险
     label.innerHTML = `${field.label}<span class="field-unit">${field.unit}</span>`;
 
     const stepper = document.createElement('div');
@@ -501,17 +592,21 @@ function renderSettings() {
     plus.textContent = '+';
     plus.setAttribute('aria-label', `增加${field.label}`);
 
-    const clamp = v => Math.min(field.max, Math.max(field.min, v));
-
     const commit = () => {
-      const v = clamp(Math.round(Number(input.value) || 0));
+      const v = clampField(field, input.value);   // NaN、空值、越界都会被夹住
       draft[field.key] = v;
       input.value = v;
       updateSettingsTotal();
     };
 
-    minus.addEventListener('click', () => { input.value = clamp(draft[field.key] - field.step); commit(); });
-    plus .addEventListener('click', () => { input.value = clamp(draft[field.key] + field.step); commit(); });
+    minus.addEventListener('click', () => {
+      input.value = clampField(field, draft[field.key] - field.step);
+      commit();
+    });
+    plus.addEventListener('click', () => {
+      input.value = clampField(field, draft[field.key] + field.step);
+      commit();
+    });
     input.addEventListener('change', commit);
     input.addEventListener('blur', commit);
 
@@ -533,22 +628,22 @@ function updateSettingsTotal() {
    ============================================================ */
 
 els.btnStart.addEventListener('click', () => {
-  // 「开始」和「继续」共用一个按钮，用文字区分
-  if (els.btnStart.textContent === '继续') resume();
+  // 「开始」「继续」「再来一次」共用一个按钮，靠 setControls 写下的状态分支
+  if (els.btnStart.dataset.mode === 'paused') resume();
   else start();
 });
 
 els.btnPause.addEventListener('click', pause);
 els.btnReset.addEventListener('click', reset);
 els.btnSettings.addEventListener('click', openSettings);
-els.btnCancel.addEventListener('click', closeSettings);
+els.btnCancel.addEventListener('click', () => { closeSettings(); reset(); });
 
 els.btnSave.addEventListener('click', () => {
   config = { ...draft };
   persistConfig();
   closeSettings();
-  prepareTimeline();
-  renderIdle();
+  // 一律走 reset()，保证时间轴、按钮状态、进度条同时回到一致状态
+  reset();
 });
 
 document.querySelectorAll('[data-preset]').forEach(btn => {
@@ -558,10 +653,11 @@ document.querySelectorAll('[data-preset]').forEach(btn => {
   });
 });
 
-// 切回前台时立刻重算一次，并把屏幕常亮重新申请上
-// （系统在切后台时会自动释放 wake lock，回来必须重新申请）
+// 切回前台时立刻重算一次，并把屏幕常亮和音频上下文都救回来。
+// 系统在切后台时会自动释放 wake lock、挂起 AudioContext，回来必须重新申请。
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
+    ensureAudioAlive();
     if (running) {
       requestWakeLock();
       tick();
@@ -569,14 +665,16 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-// 防止 iPhone 双击缩放干扰连续点击
-document.addEventListener('gesturestart', e => e.preventDefault());
+// iOS 有时会拒绝在没有用户手势的情况下恢复音频上下文（锁屏、来电之后）。
+// 补一个"任何一次触摸都顺便抢救一下"的兜底；passive 不影响滚动性能。
+document.addEventListener('touchend', ensureAudioAlive, { passive: true });
 
 /* ============================================================
    10. 启动
    ============================================================ */
 
 prepareTimeline();
+setControls('idle');
 renderIdle();
 
 // 注册 Service Worker，实现离线可用

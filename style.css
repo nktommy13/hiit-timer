@@ -230,3 +230,13 @@ body[data-phase="prepare"] .screen { background: #12101f; }
 body[data-phase="work"]    .screen { background: #0a1512; }
 body[data-phase="rest"]    .screen { background: #171307; }
 body[data-phase="setrest"] .screen { background: #0b1220; }
+
+/* ---------- 消除 iPhone 双击缩放 ---------- */
+/* 注意：gesturestart 是「捏合」手势，拦不住双击缩放。
+   touch-action: manipulation 才是正解 —— 它同时去掉双击缩放
+   和 300ms 点击延迟，让连点手感跟原生一样干脆。 */
+.btn,
+.stepper button,
+.stepper input {
+  touch-action: manipulation;
+}

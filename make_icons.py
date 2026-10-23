@@ -26,10 +26,20 @@ def draw_icon(size: int) -> Image.Image:
     radius = S * 0.32           # 圆环半径
     stroke = S * 0.075          # 圆环粗细
 
-    # 圆环
+    # 圆环底座用暗色，绿色留给进度弧 ——
+    # 两者同色的话弧线叠在同色圆环上，根本看不出来
+    RING_BASE = (38, 48, 60, 255)
     d.ellipse(
         [cx - radius, cy - radius, cx + radius, cy + radius],
-        outline=RING, width=int(stroke),
+        outline=RING_BASE, width=int(stroke),
+    )
+
+    # 进度弧：从 12 点方向起顺时针约 120°
+    # 必须用 arc 而不是 pieslice —— pieslice 画的是从圆心出发的实心扇形，
+    # 会把指针和中心圆点整个糊掉
+    d.arc(
+        [cx - radius, cy - radius, cx + radius, cy + radius],
+        start=-90, end=30, fill=RING, width=int(stroke),
     )
 
     # 指针：从圆心指向 12 点方向，长度到圆环内侧
@@ -43,12 +53,6 @@ def draw_icon(size: int) -> Image.Image:
     # 中心圆点
     dot_r = S * 0.055
     d.ellipse([cx - dot_r, cy - dot_r, cx + dot_r, cy + dot_r], fill=HAND)
-
-    # 下方一小段绿色弧线，暗示"进度" —— 用扇形遮罩实现
-    d.pieslice(
-        [cx - radius, cy - radius, cx + radius, cy + radius],
-        start=96, end=140, fill=RING,
-    )
 
     return img.resize((size, size), Image.LANCZOS)
 
