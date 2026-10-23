@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>HIIT 计时器</title>
+
+<!-- iOS「添加到主屏幕」后以全屏 App 形式启动 -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="HIIT">
+<meta name="theme-color" content="#0b0f14">
+
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ==================== 计时界面 ==================== -->
+<section id="screen-timer" class="screen">
+
+  <!-- 顶部总进度条 -->
+  <div class="progress-track"><div id="progress-fill"></div></div>
+
+  <header class="topbar">
+    <span id="phase-label">准备</span>
+    <span id="round-label">— / —</span>
+  </header>
+
+  <main class="countdown-wrap">
+    <div id="countdown">—</div>
+    <div id="next-label"></div>
+  </main>
+
+  <footer class="controls">
+    <button id="btn-start"    class="btn btn-primary">开始</button>
+    <button id="btn-pause"    class="btn btn-primary" hidden>暂停</button>
+    <button id="btn-reset"    class="btn btn-ghost">重置</button>
+    <button id="btn-settings" class="btn btn-ghost">设置</button>
+  </footer>
+</section>
+
+<!-- ==================== 设置界面 ==================== -->
+<section id="screen-settings" class="screen" hidden>
+  <header class="topbar"><span>设置</span><span id="settings-total"></span></header>
+
+  <main class="settings-list" id="settings-list">
+    <!-- 由 app.js 根据 FIELDS 生成，避免手写六行重复 HTML -->
+  </main>
+
+  <footer class="controls controls-wrap">
+    <button data-preset="tabata"  class="btn btn-ghost">Tabata</button>
+    <button data-preset="classic" class="btn btn-ghost">30/15</button>
+    <button data-preset="emom"    class="btn btn-ghost">40/20</button>
+    <button id="btn-cancel" class="btn btn-ghost">取消</button>
+    <button id="btn-save"   class="btn btn-primary">保存</button>
+  </footer>
+</section>
+
+<script src="app.js"></script>
+</body>
+</html>

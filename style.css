@@ -1,0 +1,232 @@
+/* =========================================================
+   HIIT 计时器 —— 样式
+   设计目标：站在一米外、喘着气也能一眼看清
+   ========================================================= */
+
+:root {
+  --bg:        #0b0f14;
+  --surface:   #151b23;
+  --border:    #26303c;
+  --text:      #e8eef5;
+  --text-dim:  #7c8a9a;
+  --accent:    #34d399;   /* 默认主色，会随阶段变化 */
+
+  --phase-prepare: #a78bfa;  /* 紫 */
+  --phase-work:    #34d399;  /* 绿 = 动起来 */
+  --phase-rest:    #fbbf24;  /* 黄 = 歇一下 */
+  --phase-setrest: #60a5fa;  /* 蓝 = 组间 */
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text",
+               "PingFang SC", "Helvetica Neue", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;      /* 阻止 iPhone 下拉橡皮筋 */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+body {
+  /* 适配 iPhone 刘海 / 底部 Home 指示条 */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+           env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+/* ---------- 布局骨架 ---------- */
+
+.screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  padding: calc(env(safe-area-inset-top) + 12px) 20px
+           calc(env(safe-area-inset-bottom) + 16px);
+  transition: background-color .25s ease;
+}
+
+.screen[hidden] { display: none; }
+
+/* ---------- 顶部总进度条 ---------- */
+
+.progress-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  overflow: hidden;
+  flex: none;
+  margin-bottom: 18px;
+}
+
+#progress-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width .2s linear, background-color .25s ease;
+}
+
+/* ---------- 顶栏 ---------- */
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex: none;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  color: var(--text-dim);
+}
+
+#phase-label {
+  color: var(--accent);
+  font-size: 20px;
+  text-transform: uppercase;
+  transition: color .25s ease;
+}
+
+/* ---------- 倒计时主体 ---------- */
+
+.countdown-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+}
+
+#countdown {
+  font-size: clamp(96px, 38vw, 260px);
+  font-weight: 700;
+  line-height: .9;
+  letter-spacing: -.04em;
+  font-variant-numeric: tabular-nums;   /* 数字等宽，变化时不抖动 */
+  color: var(--accent);
+  transition: color .25s ease;
+}
+
+/* 最后 3 秒：数字轻微搏动，强化紧迫感 */
+#countdown.urgent { animation: pulse .6s ease-in-out infinite; }
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1);    opacity: 1;   }
+  50%      { transform: scale(1.06); opacity: .8;  }
+}
+
+#next-label {
+  margin-top: 18px;
+  font-size: 15px;
+  color: var(--text-dim);
+  letter-spacing: .02em;
+  min-height: 20px;
+}
+
+/* ---------- 按钮 ---------- */
+
+.controls {
+  display: flex;
+  gap: 10px;
+  flex: none;
+  padding-top: 16px;
+}
+
+.controls-wrap { flex-wrap: wrap; }
+
+.btn {
+  flex: 1;
+  min-width: 84px;
+  min-height: 56px;               /* 足够大的点击区域 */
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 17px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: transform .08s ease, background-color .2s ease;
+}
+
+.btn:active { transform: scale(.97); }
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #06120c;
+}
+
+.btn-ghost { color: var(--text-dim); }
+
+/* ---------- 设置列表 ---------- */
+
+.settings-list {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 8px 0;
+  min-height: 0;
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.field-label { font-size: 17px; }
+
+.field-unit { font-size: 13px; color: var(--text-dim); margin-left: 6px; }
+
+.stepper { display: flex; align-items: center; gap: 4px; }
+
+.stepper button {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.stepper button:active { transform: scale(.94); }
+
+.stepper input {
+  width: 66px;
+  height: 42px;
+  text-align: center;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 19px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  font-family: inherit;
+}
+
+/* 隐藏 number 输入框的上下箭头 */
+.stepper input::-webkit-outer-spin-button,
+.stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.stepper input[type=number] { -moz-appearance: textfield; }
+
+/* ---------- 各阶段的配色（整屏轻微染色） ---------- */
+
+body[data-phase="prepare"] .screen { background: #12101f; }
+body[data-phase="work"]    .screen { background: #0a1512; }
+body[data-phase="rest"]    .screen { background: #171307; }
+body[data-phase="setrest"] .screen { background: #0b1220; }
