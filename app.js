@@ -767,7 +767,7 @@ function sameConfig(a, b) {
 }
 
 /**
- * 主屏待机时的快捷条：点一下 = 载入该槽 + 立即开始。
+ * 主屏待机时的快捷条：点一下把该槽载入为主屏当前配置（不自动开始）。
  *
  * 只列出已填写的槽 —— 空槽在主屏没有意义（那是设置界面的事）。
  * 一个都没填时给一行提示，否则用户根本不知道有这个功能。
@@ -797,7 +797,7 @@ function renderQuickSlots() {
     // 标记「当前配置就是这个槽」，一眼看出正在用哪套参数
     btn.classList.toggle('is-current', sameConfig(slot, config));
     btn.setAttribute('aria-label',
-      `载入记忆槽 ${i + 1} 并立即开始：${slotSummary(slot)}`);
+      `载入记忆槽 ${i + 1}：${slotSummary(slot)}，再点「开始」启动`);
 
     const key = document.createElement('span');
     key.className = 'quick-slot-key';
@@ -815,19 +815,23 @@ function renderQuickSlots() {
   });
 }
 
-/** 点主屏快捷槽：换成这套参数、落盘，然后立刻开始 */
-function startFromSlot(i) {
+/**
+ * 点主屏快捷槽：把该槽的参数载入为主屏当前配置。
+ *
+ * **不自动开始** —— 载入是「选好这次练什么」，开始是「现在开始练」，
+ * 分成两步可以避免误触直接进训练。载入后主屏的倒计时、总时长、
+ * 「当前是哪个槽」的高亮都会立刻更新，用户再点「开始」即可。
+ */
+function applySlot(i) {
   if (running) return;
   if (!Number.isInteger(i) || i < 0 || i >= SLOT_COUNT || !slots[i]) return;
 
   config = { ...slots[i] };
   persistConfig();          // 冷启动后仍是最后用过的那套
 
-  // 这里的 reset() 与 start() 内部的 prepareTimeline() 确有重复，保留是故意的：
-  // reset() 是本项目「回到一致状态」的统一原语（「保存」按钮也走它），
-  // 先归零再启动，比只调 start() 更能保证没有残留的 running / 定时器 / 唤醒锁状态。
+  // reset() 重建时间轴 + 回到 idle + 重绘界面；它内部的 setControls('idle')
+  // 会顺带 renderQuickSlots()，所以高亮标记也跟着转到这个槽。
   reset();
-  start();                  // 免去再点一次「开始」
 }
 
 /* ============================================================
@@ -868,7 +872,7 @@ els.settingsList.addEventListener('click', (ev) => {
 // 主屏快捷槽：同样用委托，因为 renderQuickSlots 会重建节点
 els.quickSlots.addEventListener('click', (ev) => {
   const btn = ev.target.closest('.quick-slot');
-  if (btn) startFromSlot(Number(btn.dataset.slot));
+  if (btn) applySlot(Number(btn.dataset.slot));
 });
 
 // 切回前台时立刻重算一次，并把屏幕常亮和音频上下文都救回来。
