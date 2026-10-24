@@ -496,6 +496,7 @@ const els = {
   settingsTotal:  document.getElementById('settings-total'),
   btnSave:        document.getElementById('btn-save'),
   btnCancel:      document.getElementById('btn-cancel'),
+  quickSlots:     document.getElementById('quick-slots'),
 };
 
 function setAccent(color) {
@@ -524,6 +525,12 @@ function setControls(mode) {
     mode === 'done'   ? '再来一次' :
     mode === 'paused' ? '继续'     :
                         '开始';
+
+  // 快捷槽只在待机/结束时可用 —— 和「设置」同一条理由：
+  // 中途换配置会把正在跑的时间轴整个换掉，而起点时间戳还指向旧时间轴。
+  // 隐藏时重新渲染一次，顺便刷新「哪个槽是当前配置」的标记。
+  els.quickSlots.hidden = !canEdit;
+  if (canEdit) renderQuickSlots();
 
   // 把状态存在 dataset 里，点击时据此分支 —— 比比对按钮文字可靠
   els.btnStart.dataset.mode = mode;
@@ -744,6 +751,7 @@ function saveSlot(i) {
   slots[i] = sanitizeConfig(draft);   // 保证槽里永远是六个完整的合法字段
   persistSlots();
   renderSlots();
+  renderQuickSlots();                 // 主屏快捷条同步更新
 }
 
 /** 把第 i 个槽载入成当前编辑副本（需再点「保存」才生效） */
@@ -751,6 +759,69 @@ function loadSlot(i) {
   if (!Number.isInteger(i) || i < 0 || i >= SLOT_COUNT || !slots[i]) return;
   draft = { ...slots[i] };
   renderSettings();          // 字段值、总时长、槽区一起重绘
+}
+
+/** 两份参数是否完全相同（用于标记「当前就是这个槽」） */
+function sameConfig(a, b) {
+  return FIELDS.every(f => a[f.key] === b[f.key]);
+}
+
+/**
+ * 主屏待机时的快捷条：点一下 = 载入该槽 + 立即开始。
+ *
+ * 只列出已填写的槽 —— 空槽在主屏没有意义（那是设置界面的事）。
+ * 一个都没填时给一行提示，否则用户根本不知道有这个功能。
+ */
+function renderQuickSlots() {
+  const wrap = els.quickSlots;
+  if (!wrap) return;
+  wrap.innerHTML = '';
+
+  const filled = slots
+    .map((slot, i) => ({ slot, i }))
+    .filter(x => x.slot);
+
+  if (!filled.length) {
+    const hint = document.createElement('div');
+    hint.className = 'quick-hint';
+    hint.textContent = '在「设置」里点「存」存一个记忆槽，这里就能一键开始';
+    wrap.append(hint);
+    return;
+  }
+
+  filled.forEach(({ slot, i }) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.dataset.slot = String(i);
+    btn.className = 'quick-slot';
+    // 标记「当前配置就是这个槽」，一眼看出正在用哪套参数
+    btn.classList.toggle('is-current', sameConfig(slot, config));
+    btn.setAttribute('aria-label',
+      `载入记忆槽 ${i + 1} 并立即开始：${slotSummary(slot)}`);
+
+    const key = document.createElement('span');
+    key.className = 'quick-slot-key';
+    key.textContent = `${slot.work}/${slot.rest}`;      // 最identifying的一行
+
+    const sub = document.createElement('span');
+    sub.className = 'quick-slot-sub';
+    sub.textContent = `槽${i + 1} · ${slot.rounds}轮` +
+      (slot.sets > 1 ? `×${slot.sets}组` : '');
+
+    btn.append(key, sub);
+    wrap.append(btn);
+  });
+}
+
+/** 点主屏快捷槽：换成这套参数、落盘，然后立刻开始 */
+function startFromSlot(i) {
+  if (running) return;
+  if (!Number.isInteger(i) || i < 0 || i >= SLOT_COUNT || !slots[i]) return;
+
+  config = { ...slots[i] };
+  persistConfig();          // 冷启动后仍是最后用过的那套
+  reset();                  // 重建时间轴 + 复位按钮与进度
+  start();                  // 免去再点一次「开始」
 }
 
 /* ============================================================
@@ -771,6 +842,7 @@ els.btnCancel.addEventListener('click', () => { closeSettings(); reset(); });
 els.btnSave.addEventListener('click', () => {
   config = { ...draft };
   persistConfig();
+  renderQuickSlots();        // 「当前配置」标记可能变了
   closeSettings();
   // 一律走 reset()，保证时间轴、按钮状态、进度条同时回到一致状态
   reset();
@@ -784,6 +856,12 @@ els.settingsList.addEventListener('click', (ev) => {
 
   const loadBtn = ev.target.closest('.slot-btn');
   if (loadBtn && !loadBtn.disabled) loadSlot(Number(loadBtn.dataset.slot));
+});
+
+// 主屏快捷槽：同样用委托，因为 renderQuickSlots 会重建节点
+els.quickSlots.addEventListener('click', (ev) => {
+  const btn = ev.target.closest('.quick-slot');
+  if (btn) startFromSlot(Number(btn.dataset.slot));
 });
 
 // 切回前台时立刻重算一次，并把屏幕常亮和音频上下文都救回来。
