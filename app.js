@@ -164,6 +164,7 @@ function unlockAudio() {
   }
 
   ensureAudioAlive();
+  decodeVoice();          // audioCtx 就绪了，可以把预取到的人声解码出来
 
   // iOS 默认把 Web Audio 归到"环境音"通道，静音拨片一拨就彻底没声音。
   // 声明成 playback 通道才能穿透静音开关（Safari 17+）。
@@ -227,13 +228,111 @@ function beep({ freq = 880, duration = 0.12, gain = 0.35, count = 1, gap = 0.18 
   }
 }
 
+/** 秒表滴答的音量 —— 压得很低，只当背景节拍，绝不能盖过提示音和人声 */
+const TICK_GAIN = 0.06;
+
+/**
+ * 秒表滴答 —— 贯穿全程的背景节拍。
+ *
+ * 单独写而不复用 beep()：beep 的包络是为 0.1 秒以上的音设计的
+ * （淡入 12ms、淡出 20ms），套到 30ms 的滴答上会让淡出时刻落到起点之前。
+ */
+function playTick() {
+  if (!audioCtx) return;
+
+  const t0  = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator();
+  const vol = audioCtx.createGain();
+
+  osc.type = 'triangle';            // 比正弦更像机械"嗒"，又不像方波那样刺耳
+  osc.frequency.value = 1700;
+
+  // 极快起音 + 快速衰减 = 干脆的一声；指数衰减不能把目标写成 0
+  vol.gain.setValueAtTime(0, t0);
+  vol.gain.linearRampToValueAtTime(TICK_GAIN, t0 + 0.002);
+  vol.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.030);
+
+  osc.connect(vol);
+  vol.connect(audioCtx.destination);
+  osc.start(t0);
+  osc.stop(t0 + 0.035);
+  osc.onended = () => { try { vol.disconnect(); } catch (err) {} };
+}
+
+/* ------------------------------------------------------------
+   人声：work / rest / long rest
+   ------------------------------------------------------------
+   这三个词没法用振荡器合成，所以用预先用 TTS 生成好的小 mp3
+   （每个 4~6KB，已剪掉首尾静音）。它们走的是和提示音同一条
+   Web Audio 通路 —— 也就是已经被 iOS 验证过的那条 —— 不引入新的平台风险。
+   ------------------------------------------------------------ */
+
+const VOICE_FILES = {
+  work:    'voice/work.mp3',
+  rest:    'voice/rest.mp3',
+  setrest: 'voice/longrest.mp3',     // 组间休息说的是 "long rest"
+};
+
+const voiceBytes   = {};   // 预取到的原始字节（不需要 AudioContext）
+const voiceBuffers = {};   // 解码后的可播放缓冲（需要 AudioContext）
+
+/** 页面加载时就把字节抓下来（走 SW 缓存，离线也行），免得第一次报词时才等 */
+async function prefetchVoice() {
+  await Promise.all(Object.entries(VOICE_FILES).map(async ([key, url]) => {
+    try {
+      const res = await fetch(url);
+      if (res.ok) voiceBytes[key] = await res.arrayBuffer();
+      else console.warn('人声文件缺失，该阶段只播提示音', url, res.status);
+    } catch (err) {
+      console.warn('人声预取失败（不影响计时）', key, err);
+    }
+  }));
+}
+
+/** 解码成可播放缓冲。必须在 audioCtx 就绪之后调用。 */
+function decodeVoice() {
+  if (!audioCtx) return;
+  Object.entries(voiceBytes).forEach(([key, bytes]) => {
+    if (voiceBuffers[key] || !bytes) return;
+    // decodeAudioData 会「吃掉」传入的 ArrayBuffer，所以给副本
+    audioCtx.decodeAudioData(bytes.slice(0))
+      .then(buf => { voiceBuffers[key] = buf; })
+      .catch(err => console.warn('人声解码失败（不影响计时）', key, err));
+  });
+}
+
+/**
+ * 报出阶段名字。
+ * @param {number} delay 延迟多少秒再开口 —— 先让提示音响完，
+ *                       否则两者叠在同一瞬间会糊成一团
+ */
+function speak(phase, delay = 0.24) {
+  const buf = voiceBuffers[phase];
+  if (!buf || !audioCtx) return;          // 还没加载好就安静跳过，不影响计时
+
+  ensureAudioAlive();
+
+  const src = audioCtx.createBufferSource();
+  const vol = audioCtx.createGain();
+  src.buffer = buf;
+  vol.gain.value = 0.95;                  // 人声必须盖过滴答和提示音
+  src.connect(vol);
+  vol.connect(audioCtx.destination);
+  src.start(audioCtx.currentTime + delay);
+  src.onended = () => { try { vol.disconnect(); } catch (err) {} };
+}
+
 /** 进入某个阶段时的提示音（音高不同 = 闭着眼也知道该干嘛） */
 function announcePhase(phase) {
   switch (phase) {
     case 'prepare': beep({ freq: 784,  duration: 0.12, gain: 0.30 }); break;   // 中音
-    case 'work':    beep({ freq: 1046, duration: 0.16, gain: 0.42 }); break;   // 高音 = 上！
-    case 'rest':    beep({ freq: 587,  duration: 0.16, gain: 0.34 }); break;   // 低音 = 歇
-    case 'setrest': beep({ freq: 523,  duration: 0.15, gain: 0.34, count: 2, gap: 0.22 }); break;
+    case 'work':    beep({ freq: 1046, duration: 0.16, gain: 0.42 });          // 高音 = 上！
+                    speak('work'); break;
+    case 'rest':    beep({ freq: 587,  duration: 0.16, gain: 0.34 });          // 低音 = 歇
+                    speak('rest'); break;
+    // 组间休息的提示音是连续两声（约 0.37 秒），人声要等更久才不打架
+    case 'setrest': beep({ freq: 523,  duration: 0.15, gain: 0.34, count: 2, gap: 0.22 });
+                    speak('setrest', 0.5); break;
     case 'done':    beep({ freq: 1046, duration: 0.18, gain: 0.42, count: 3, gap: 0.24 }); break;
   }
 }
@@ -299,6 +398,7 @@ let running       = false;
 let tickHandle    = null;
 let currentIndex  = -1;     // 当前处在时间轴的第几段
 let lastCountdown = null;   // 已经响过的倒计时秒数，避免同一秒重复响
+let lastTickSecond = 0;     // 已经滴答过的整秒，避免同一秒重复响
 
 const TICK_MS = 100;        // 每 100ms 刷新一次显示；计算与它无关，只影响刷新平滑度
 
@@ -320,6 +420,7 @@ function prepareTimeline() {
   totalDuration = timeline.reduce((sum, s) => sum + s.duration, 0);
   currentIndex  = -1;
   lastCountdown = null;
+  lastTickSecond = 0;        // 起手那一下不响，第一次滴答落在第 1 秒
 }
 
 function start() {
@@ -411,6 +512,7 @@ function tick() {
       // 只响一声提醒"已经到这儿了"，不要补响一串音。
       // jumped < 0：时间被往回拨过（系统对时），重新报一次当前阶段即可。
       beep({ freq: 784, duration: 0.15, gain: 0.35 });
+      speak(state.step.phase);        // 回到前台时顺便报一句现在该做什么
 
       // 如果落点正好在最后 3 秒，把倒计时标记预置好；否则这一帧会
       // 同时响"恢复音"和"倒数音"，听起来像卡了一下
@@ -420,9 +522,18 @@ function tick() {
 
   // ---- 最后 3 秒的倒数提示音 ----
   const secsLeft = Math.ceil(state.remaining);
-  if (state.step.duration > 3 && secsLeft <= 3 && secsLeft >= 1 && secsLeft !== lastCountdown) {
+  const counting = (state.step.duration > 3 && secsLeft <= 3 && secsLeft >= 1);
+  if (counting && secsLeft !== lastCountdown) {
     lastCountdown = secsLeft;
     beep({ freq: 660, duration: 0.07, gain: 0.25 });
+  }
+
+  // ---- 秒表滴答：贯穿全程的背景节拍 ----
+  // 最后 3 秒整段让给倒数提示音，否则两种声音会挤在同一秒里
+  const wholeSecond = Math.floor(elapsed);
+  if (wholeSecond !== lastTickSecond) {
+    lastTickSecond = wholeSecond;
+    if (!counting) playTick();
   }
 
   render(state.step, state.remaining, elapsed);
@@ -898,6 +1009,10 @@ document.addEventListener('touchend', ensureAudioAlive, { passive: true });
 prepareTimeline();
 setControls('idle');
 renderIdle();
+
+// 预取人声片段。放在最前面且不 await —— 它不影响任何初始化，
+// 失败也只是没有语音，计时和提示音照常工作。
+prefetchVoice();
 
 // 注册 Service Worker，实现离线可用
 if ('serviceWorker' in navigator) {

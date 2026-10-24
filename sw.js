@@ -6,7 +6,7 @@
    不用手动清缓存。等成品稳定了，可以改成缓存优先以加快启动。
    ========================================================= */
 
-const CACHE_NAME = 'hiit-v5';   // 改逻辑/资源清单时必须升版本，activate 才会清掉旧缓存
+const CACHE_NAME = 'hiit-v6';   // 改逻辑/资源清单时必须升版本，activate 才会清掉旧缓存
 
 const ASSETS = [
   './',
@@ -19,11 +19,25 @@ const ASSETS = [
   './icons/icon-512.png',
 ];
 
+// 人声片段必须和上面分开缓存：
+// cache.addAll 只要有一个 URL 返回非 2xx，整次安装就失败、App 直接没网可用。
+// 而人声是"锦上添花"——缺了只是没有语音播报，计时和提示音照常。
+const OPTIONAL_ASSETS = [
+  './voice/work.mp3',
+  './voice/rest.mp3',
+  './voice/longrest.mp3',
+];
+
 // 安装：预缓存全部资源
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(ASSETS))
+      .then(async cache => {
+        await cache.addAll(ASSETS);
+        await Promise.all(
+          OPTIONAL_ASSETS.map(url => cache.add(url).catch(() => {}))
+        );
+      })
       .then(() => self.skipWaiting())
   );
 });
