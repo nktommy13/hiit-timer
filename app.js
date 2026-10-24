@@ -53,10 +53,24 @@ const PHASE_META = {
 const STORAGE_KEY = 'hiit.config.v1';
 const SLOTS_KEY   = 'hiit.slots.v1';
 
-/** 把任意输入夹到合法范围；非法值（NaN、空、乱码）回落到该字段的最小值 */
+/**
+ * 判断一个值是否「真能当数字用」。
+ *
+ * 必须显式排除 null / '' / true / false / [] —— Number() 会把它们隐式转成 0 或 1，
+ * 于是「这个值坏了」会被误判成「这个值是 0」，损坏的存档就不会回落到出厂值
+ * （例如存档里 work 被写成 null，本应回落成 20，却会被夹成最小值 5）。
+ * JSON 里 NaN / Infinity 会被序列化成 null，所以这是最常见的数值损坏形态。
+ */
+function isNumeric(v) {
+  if (typeof v === 'number') return Number.isFinite(v);
+  if (typeof v === 'string') return v.trim() !== '' && Number.isFinite(Number(v));
+  return false;
+}
+
+/** 把任意输入夹到合法范围；非法值（null、空串、乱码）回落到该字段的最小值 */
 function clampField(field, raw) {
+  if (!isNumeric(raw)) return field.min;
   const n = Math.round(Number(raw));
-  if (!Number.isFinite(n)) return field.min;
   return Math.min(field.max, Math.max(field.min, n));
 }
 
@@ -72,9 +86,9 @@ function sanitizeConfig(src) {
 
   FIELDS.forEach(field => {
     const raw = src[field.key];
-    out[field.key] = Number.isFinite(Math.round(Number(raw)))
-      ? clampField(field, raw)
-      : DEFAULT_CONFIG[field.key];
+    out[field.key] = isNumeric(raw)
+      ? clampField(field, raw)              // 能解析 → 夹到 [min, max]
+      : DEFAULT_CONFIG[field.key];          // 解析不出 → 回落出厂值（不是夹到最小值）
   });
   return out;
 }
@@ -109,8 +123,7 @@ function loadSlots() {
 
   for (let i = 0; i < SLOT_COUNT; i++) {
     const s = raw[i];
-    if (s && typeof s === 'object' &&
-        FIELDS.every(f => Number.isFinite(Math.round(Number(s[f.key]))))) {
+    if (s && typeof s === 'object' && FIELDS.every(f => isNumeric(s[f.key]))) {
       out[i] = sanitizeConfig(s);
     }
   }
@@ -723,15 +736,19 @@ function renderSlots() {
 
 /** 把当前编辑中的参数写进第 i 个槽 */
 function saveSlot(i) {
-  if (i < 0 || i >= SLOT_COUNT) return;
-  slots[i] = { ...draft };
+  // 两道防御：
+  // 1) draft 为 null 时 `{ ...null }` 不报错而是得到 {}，会把槽污染成空对象 ——
+  //    之后载入按钮会亮、摘要显示 undefined，载入后时间轴为空，一按开始就跳「完成」。
+  // 2) NaN < 0 与 NaN >= SLOT_COUNT 同时为 false，vanilla 的边界写法拦不住 NaN 索引。
+  if (!draft || !Number.isInteger(i) || i < 0 || i >= SLOT_COUNT) return;
+  slots[i] = sanitizeConfig(draft);   // 保证槽里永远是六个完整的合法字段
   persistSlots();
   renderSlots();
 }
 
 /** 把第 i 个槽载入成当前编辑副本（需再点「保存」才生效） */
 function loadSlot(i) {
-  if (!slots[i]) return;
+  if (!Number.isInteger(i) || i < 0 || i >= SLOT_COUNT || !slots[i]) return;
   draft = { ...slots[i] };
   renderSettings();          // 字段值、总时长、槽区一起重绘
 }
