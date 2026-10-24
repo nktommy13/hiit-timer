@@ -280,9 +280,15 @@ body[data-phase="setrest"] .screen { background: #0b1220; }
 }
 
 .quick-slot-sub {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-dim);
   white-space: nowrap;
+  /* 三件套缺一不可：只给父元素 min-width:0 不会让 nowrap 子元素自动收缩。
+     最窄的 iPhone（320px）上三槽并排时每个内容盒只有 ~77px，
+     没有这三行文字会直接压在圆角边框上。 */
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .quick-hint {

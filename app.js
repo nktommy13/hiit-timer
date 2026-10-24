@@ -528,7 +528,7 @@ function setControls(mode) {
 
   // 快捷槽只在待机/结束时可用 —— 和「设置」同一条理由：
   // 中途换配置会把正在跑的时间轴整个换掉，而起点时间戳还指向旧时间轴。
-  // 隐藏时重新渲染一次，顺便刷新「哪个槽是当前配置」的标记。
+  // 可见时重新渲染一次，顺便刷新「哪个槽是当前配置」的标记。
   els.quickSlots.hidden = !canEdit;
   if (canEdit) renderQuickSlots();
 
@@ -805,7 +805,9 @@ function renderQuickSlots() {
 
     const sub = document.createElement('span');
     sub.className = 'quick-slot-sub';
-    sub.textContent = `槽${i + 1} · ${slot.rounds}轮` +
+    // 不写 `槽1 · 7轮×3组` 那种带空格的写法：320px 窄屏上三槽并排时
+    // 每个块的内容盒只有约 77px，空格会把它推过边框
+    sub.textContent = `槽${i + 1}·${slot.rounds}轮` +
       (slot.sets > 1 ? `×${slot.sets}组` : '');
 
     btn.append(key, sub);
@@ -820,7 +822,11 @@ function startFromSlot(i) {
 
   config = { ...slots[i] };
   persistConfig();          // 冷启动后仍是最后用过的那套
-  reset();                  // 重建时间轴 + 复位按钮与进度
+
+  // 这里的 reset() 与 start() 内部的 prepareTimeline() 确有重复，保留是故意的：
+  // reset() 是本项目「回到一致状态」的统一原语（「保存」按钮也走它），
+  // 先归零再启动，比只调 start() 更能保证没有残留的 running / 定时器 / 唤醒锁状态。
+  reset();
   start();                  // 免去再点一次「开始」
 }
 
@@ -842,7 +848,8 @@ els.btnCancel.addEventListener('click', () => { closeSettings(); reset(); });
 els.btnSave.addEventListener('click', () => {
   config = { ...draft };
   persistConfig();
-  renderQuickSlots();        // 「当前配置」标记可能变了
+  // 不必在这里重绘快捷槽：紧随其后的 reset() 会走 setControls('idle')，
+  // 那里面已经会 renderQuickSlots()，标记自然会更新。
   closeSettings();
   // 一律走 reset()，保证时间轴、按钮状态、进度条同时回到一致状态
   reset();
