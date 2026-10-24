@@ -25,12 +25,11 @@
    1. 配置
    ============================================================ */
 
-/** 预设方案 */
-const PRESETS = {
-  tabata:  { prepare: 10, work: 20, rest: 10, rounds: 8,  sets: 1, setRest: 60 },
-  classic: { prepare: 10, work: 30, rest: 15, rounds: 10, sets: 1, setRest: 60 },
-  emom:    { prepare: 10, work: 40, rest: 20, rounds: 12, sets: 1, setRest: 60 },
-};
+/** 出厂默认值 —— 也是存档损坏 / 首次使用时的回落目标 */
+const DEFAULT_CONFIG = { prepare: 10, work: 20, rest: 10, rounds: 8, sets: 1, setRest: 60 };
+
+/** 记忆槽数量（固定三个） */
+const SLOT_COUNT = 3;
 
 /** 每个可调参数的元信息 —— 设置界面和数值校验都由它驱动 */
 const FIELDS = [
@@ -52,6 +51,7 @@ const PHASE_META = {
 };
 
 const STORAGE_KEY = 'hiit.config.v1';
+const SLOTS_KEY   = 'hiit.slots.v1';
 
 /** 把任意输入夹到合法范围；非法值（NaN、空、乱码）回落到该字段的最小值 */
 function clampField(field, raw) {
@@ -60,28 +60,61 @@ function clampField(field, raw) {
   return Math.min(field.max, Math.max(field.min, n));
 }
 
+/**
+ * 把任意一份参数逐项夹回合法范围。
+ * 存档可能被手改坏，也可能来自参数范围不同的旧版本，必须逐项过一遍 ——
+ * 否则 rounds 变成 null 之类会让时间轴直接空掉，一按「开始」就跳到「完成」。
+ * 语义分两条：能解析成数 → 夹到 [min, max]；解析不出来 → 回落到出厂值。
+ */
+function sanitizeConfig(src) {
+  const out = { ...DEFAULT_CONFIG };
+  if (!src || typeof src !== 'object') return out;
+
+  FIELDS.forEach(field => {
+    const raw = src[field.key];
+    out[field.key] = Number.isFinite(Math.round(Number(raw)))
+      ? clampField(field, raw)
+      : DEFAULT_CONFIG[field.key];
+  });
+  return out;
+}
+
 let config = loadConfig();
 
 function loadConfig() {
-  const merged = { ...PRESETS.tabata };
-
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) Object.assign(merged, JSON.parse(raw));
+    if (raw) return sanitizeConfig(JSON.parse(raw));
   } catch (err) {
     console.warn('读取本地配置失败，改用默认值', err);
   }
+  return { ...DEFAULT_CONFIG };
+}
 
-  // 存档可能被手改坏，也可能来自参数范围不同的旧版本，必须逐项夹回合法范围。
-  // 否则 rounds 变成 null 之类会让时间轴直接空掉，一按「开始」就跳到「完成」。
-  FIELDS.forEach(field => {
-    const ok = Number.isFinite(Math.round(Number(merged[field.key])));
-    merged[field.key] = ok
-      ? clampField(field, merged[field.key])
-      : PRESETS.tabata[field.key];
-  });
+/**
+ * 读取三个记忆槽。null = 空槽。
+ * 只有「六个字段都在、且都能解析成数」才算有效槽 —— 半损坏的数据宁可视作空槽，
+ * 也不要载入后产生空时间轴。
+ */
+function loadSlots() {
+  let raw = null;
+  try {
+    raw = JSON.parse(localStorage.getItem(SLOTS_KEY) || 'null');
+  } catch (err) {
+    console.warn('读取记忆槽失败，全部视作空槽', err);
+  }
 
-  return merged;
+  const out = new Array(SLOT_COUNT).fill(null);
+  if (!Array.isArray(raw)) return out;
+
+  for (let i = 0; i < SLOT_COUNT; i++) {
+    const s = raw[i];
+    if (s && typeof s === 'object' &&
+        FIELDS.every(f => Number.isFinite(Math.round(Number(s[f.key]))))) {
+      out[i] = sanitizeConfig(s);
+    }
+  }
+  return out;
 }
 
 function persistConfig() {
@@ -89,6 +122,14 @@ function persistConfig() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
   } catch (err) {
     console.warn('保存本地配置失败', err);
+  }
+}
+
+function persistSlots() {
+  try {
+    localStorage.setItem(SLOTS_KEY, JSON.stringify(slots));
+  } catch (err) {
+    console.warn('保存记忆槽失败', err);
   }
 }
 
@@ -549,7 +590,8 @@ function showScreen(name) {
    8. 设置界面
    ============================================================ */
 
-let draft = null;      // 编辑中的副本，点「保存」才写回 config
+let draft = null;            // 编辑中的副本，点「保存」才写回 config
+const slots = loadSlots();    // 三个记忆槽，null = 空槽
 
 function openSettings() {
   if (running) return;                   // 双保险：训练中不允许进设置
@@ -615,12 +657,83 @@ function renderSettings() {
     els.settingsList.append(row);
   });
 
+  // 记忆槽跟在参数字段后面，一起滚动，不挤占底部按钮区
+  const slotsWrap = document.createElement('div');
+  slotsWrap.id = 'settings-slots';
+  els.settingsList.append(slotsWrap);
+  renderSlots();
+
   updateSettingsTotal();
 }
 
 function updateSettingsTotal() {
   const secs = buildSteps(draft).reduce((sum, s) => sum + s.duration, 0);
   els.settingsTotal.textContent = `${Math.floor(secs / 60)} 分 ${secs % 60} 秒`;
+}
+
+/** 槽内容的一行摘要，例如「20/10 秒 · 8 轮」或「20/10 秒 · 8 轮 × 3 组」 */
+function slotSummary(s) {
+  const base = `${s.work}/${s.rest} 秒 · ${s.rounds} 轮`;
+  return s.sets > 1 ? `${base} × ${s.sets} 组` : base;
+}
+
+function renderSlots() {
+  const wrap = document.getElementById('settings-slots');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+
+  const head = document.createElement('div');
+  head.className = 'slots-head';
+  // 内容全部来自代码常量，不含用户输入
+  head.innerHTML = '记忆槽<span class="field-unit">点槽载入 · 点「存」写入</span>';
+  wrap.append(head);
+
+  slots.forEach((slot, i) => {
+    const row = document.createElement('div');
+    row.className = 'slot-row';
+
+    const load = document.createElement('button');
+    load.type = 'button';
+    load.className = 'slot-btn';
+    load.dataset.slot = String(i);
+    load.disabled = !slot;                        // 空槽没有可载入的东西
+    load.setAttribute('aria-label', slot ? `载入记忆槽 ${i + 1}` : `记忆槽 ${i + 1} 为空`);
+
+    const name = document.createElement('span');
+    name.className = 'slot-name';
+    name.textContent = `槽 ${i + 1}`;
+
+    const desc = document.createElement('span');
+    desc.className = 'slot-desc';
+    desc.textContent = slot ? slotSummary(slot) : '空';
+
+    load.append(name, desc);
+
+    const save = document.createElement('button');
+    save.type = 'button';
+    save.className = 'slot-save';
+    save.dataset.slot = String(i);
+    save.textContent = '存';
+    save.setAttribute('aria-label', `把当前设置存入记忆槽 ${i + 1}`);
+
+    row.append(load, save);
+    wrap.append(row);
+  });
+}
+
+/** 把当前编辑中的参数写进第 i 个槽 */
+function saveSlot(i) {
+  if (i < 0 || i >= SLOT_COUNT) return;
+  slots[i] = { ...draft };
+  persistSlots();
+  renderSlots();
+}
+
+/** 把第 i 个槽载入成当前编辑副本（需再点「保存」才生效） */
+function loadSlot(i) {
+  if (!slots[i]) return;
+  draft = { ...slots[i] };
+  renderSettings();          // 字段值、总时长、槽区一起重绘
 }
 
 /* ============================================================
@@ -646,11 +759,14 @@ els.btnSave.addEventListener('click', () => {
   reset();
 });
 
-document.querySelectorAll('[data-preset]').forEach(btn => {
-  btn.addEventListener('click', () => {
-    draft = { ...PRESETS[btn.dataset.preset] };
-    renderSettings();
-  });
+// 记忆槽用事件委托：槽区每次重绘都会换掉内部节点，逐个绑定必然失效。
+// 挂在 settings-list 这个不会重建的容器上。
+els.settingsList.addEventListener('click', (ev) => {
+  const saveBtn = ev.target.closest('.slot-save');
+  if (saveBtn) { saveSlot(Number(saveBtn.dataset.slot)); return; }
+
+  const loadBtn = ev.target.closest('.slot-btn');
+  if (loadBtn && !loadBtn.disabled) loadSlot(Number(loadBtn.dataset.slot));
 });
 
 // 切回前台时立刻重算一次，并把屏幕常亮和音频上下文都救回来。

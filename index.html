@@ -48,13 +48,11 @@
   <header class="topbar"><span>设置</span><span id="settings-total"></span></header>
 
   <main class="settings-list" id="settings-list">
-    <!-- 由 app.js 根据 FIELDS 生成，避免手写六行重复 HTML -->
+    <!-- 由 app.js 根据 FIELDS 生成，避免手写六行重复 HTML；
+         记忆槽也追加在这里，跟参数字段一起滚动 -->
   </main>
 
-  <footer class="controls controls-wrap">
-    <button data-preset="tabata"  class="btn btn-ghost">Tabata</button>
-    <button data-preset="classic" class="btn btn-ghost">30/15</button>
-    <button data-preset="emom"    class="btn btn-ghost">40/20</button>
+  <footer class="controls">
     <button id="btn-cancel" class="btn btn-ghost">取消</button>
     <button id="btn-save"   class="btn btn-primary">保存</button>
   </footer>

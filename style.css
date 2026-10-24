@@ -237,6 +237,85 @@ body[data-phase="setrest"] .screen { background: #0b1220; }
    和 300ms 点击延迟，让连点手感跟原生一样干脆。 */
 .btn,
 .stepper button,
-.stepper input {
+.stepper input,
+.slot-btn,
+.slot-save {
   touch-action: manipulation;
+}
+
+/* ---------- 记忆槽 ---------- */
+
+.slots-head {
+  margin-top: 28px;
+  padding-bottom: 12px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.slot-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  padding: 6px 0;
+}
+
+/* 主体：显示槽名 + 内容摘要，点一下载入 */
+.slot-btn {
+  flex: 1;
+  min-width: 0;                       /* 允许内部文字省略号，不然会撑破 flex */
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 16px;
+  text-align: left;
+  cursor: pointer;
+  transition: transform .08s ease, border-color .2s ease;
+}
+
+.slot-btn:active:not(:disabled) { transform: scale(.98); }
+
+/* 空槽：虚线灰框，明确表达「这里还没有东西」 */
+.slot-btn:disabled {
+  background: transparent;
+  border-style: dashed;
+  color: var(--text-dim);
+  cursor: default;
+}
+
+.slot-name { flex: none; font-weight: 600; }
+
+.slot-desc {
+  color: var(--text-dim);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 侧边小按钮：把当前设置写进这个槽 */
+.slot-save {
+  flex: none;
+  width: 62px;
+  border: 1px solid var(--accent);
+  border-radius: 14px;
+  background: transparent;
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform .08s ease, background-color .2s ease;
+}
+
+.slot-save:active {
+  transform: scale(.95);
+  background: rgba(52, 211, 153, .14);
 }
