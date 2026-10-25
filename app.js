@@ -645,6 +645,10 @@ function setControls(mode) {
 
   // 把状态存在 dataset 里，点击时据此分支 —— 比比对按钮文字可靠
   els.btnStart.dataset.mode = mode;
+
+  // 同一份状态也挂到 body 上，让 CSS 能按运行状态改样式
+  // （轮次徽章只在训练中/暂停中放大）
+  document.body.dataset.run = mode;
 }
 
 function render(step, remaining, elapsed) {
@@ -658,10 +662,12 @@ function render(step, remaining, elapsed) {
   // 最后 3 秒加搏动效果，但别用在本来就极短的阶段上
   els.countdown.classList.toggle('urgent', remaining <= 3 && step.duration > 3);
 
-  // 轮次 / 组次
+  // 轮次 / 组次。
+  // 文案刻意收紧（斜杠两侧不留空格、全角空格换成普通中点）——
+  // 这行现在是训练中最显眼的徽章，少占宽度才能放大字号而不撑破窄屏。
   if (step.round != null) {
-    let txt = `第 ${step.round} / ${config.rounds} 轮`;
-    if (config.sets > 1) txt += `　·　第 ${Math.min(step.set, config.sets)} / ${config.sets} 组`;
+    let txt = `第 ${step.round}/${config.rounds} 轮`;
+    if (config.sets > 1) txt += ` · 第 ${Math.min(step.set, config.sets)}/${config.sets} 组`;
     els.roundLabel.textContent = txt;
   } else {
     els.roundLabel.textContent = `共 ${Math.round(totalDuration / 60 * 10) / 10} 分钟`;

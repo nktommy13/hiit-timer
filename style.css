@@ -91,6 +91,39 @@ body {
   transition: color .25s ease;
 }
 
+/* ---------- 轮次 / 组数徽章 ---------- */
+/* 位置在倒计时正上方（视线焦点），不在右上角 ——
+   训练中喘着气瞥一眼就该找到「跑到哪儿了」 */
+
+.round-badge {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-dim);
+  letter-spacing: .01em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;   /* 数字等宽，换轮次时宽度不跳 */
+  /* 窄屏保护：宁可出现省略号，也不让徽章撑破屏幕 */
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color .2s ease, background .2s ease, border-color .2s ease;
+}
+
+/* 训练中 / 暂停中 / 刚结束：从小字变成中轴上的大徽章 */
+body[data-run="running"] .round-badge,
+body[data-run="paused"]  .round-badge,
+body[data-run="done"]    .round-badge {
+  font-size: clamp(26px, 7.2vw, 38px);
+  font-weight: 700;
+  color: var(--text);                   /* 不用 accent：倒计时已经是 accent 色，别再抢 */
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: 999px;
+  padding: .16em .72em;                 /* 用 em，跟着字号一起缩放 */
+  margin-bottom: 8px;
+}
+
 /* ---------- 倒计时主体 ---------- */
 
 .countdown-wrap {

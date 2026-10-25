@@ -27,10 +27,12 @@
 
   <header class="topbar">
     <span id="phase-label">准备</span>
-    <span id="round-label">— / —</span>
   </header>
 
   <main class="countdown-wrap">
+    <!-- 「跑到哪儿了」放在倒计时正上方而不是右上角：
+         训练中视线本来就落在这根中轴上，右上角是最难扫到的位置 -->
+    <div id="round-label" class="round-badge">— / —</div>
     <div id="countdown">—</div>
     <div id="next-label"></div>
   </main>
