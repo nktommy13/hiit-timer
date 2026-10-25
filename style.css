@@ -110,11 +110,18 @@ body {
   transition: color .2s ease, background .2s ease, border-color .2s ease;
 }
 
+/* 轮次一行、组次一行。分行的唯一目的就是让字号能放大 ——
+   挤在一行时宽度是字号的上限，拆开后这个限制基本消失了 */
+.round-badge .badge-line { display: block; line-height: 1.08; }
+.round-badge .badge-line[hidden] { display: none; }   /* 必须写在 display:block 之后 */
+
 /* 训练中 / 暂停中 / 刚结束：从小字变成中轴上的大徽章 */
 body[data-run="running"] .round-badge,
 body[data-run="paused"]  .round-badge,
 body[data-run="done"]    .round-badge {
-  font-size: clamp(30px, calc(11.4vw - 1px), 46px);
+  /* 上限比单行版高 30%+：分行后每行只需 3.6~4.7px/px 字号，
+     不再是宽度在限制字号，而是视觉层级 —— 大约倒计时的四成 */
+  font-size: clamp(36px, 14.5vw, 58px);
   font-weight: 700;
   color: var(--text);                   /* 不用 accent：倒计时已经是 accent 色，别再抢 */
   background: var(--surface);

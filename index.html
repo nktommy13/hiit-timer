@@ -31,8 +31,13 @@
 
   <main class="countdown-wrap">
     <!-- 「跑到哪儿了」放在倒计时正上方而不是右上角：
-         训练中视线本来就落在这根中轴上，右上角是最难扫到的位置 -->
-    <div id="round-label" class="round-badge">— / —</div>
+         训练中视线本来就落在这根中轴上，右上角是最难扫到的位置。
+         轮次和组数分上下两行 —— 挤在一行时宽度是字号的上限，
+         拆开后每行都短，字号就能放大到一眼可读。 -->
+    <div id="round-label" class="round-badge">
+      <span class="badge-line" id="round-line">—</span>
+      <span class="badge-line" id="set-line" hidden></span>
+    </div>
     <div id="countdown">—</div>
     <div id="next-label"></div>
   </main>

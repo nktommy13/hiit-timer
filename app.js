@@ -596,6 +596,8 @@ const els = {
   screenSettings: document.getElementById('screen-settings'),
   phaseLabel:     document.getElementById('phase-label'),
   roundLabel:     document.getElementById('round-label'),
+  roundLine:      document.getElementById('round-line'),
+  setLine:        document.getElementById('set-line'),
   countdown:      document.getElementById('countdown'),
   nextLabel:      document.getElementById('next-label'),
   progressFill:   document.getElementById('progress-fill'),
@@ -714,12 +716,20 @@ function render(step, remaining, elapsed) {
   // 只保留中点。宽度就是字号的上限 —— 省下的宽度全部变成字高，
   // 实测「第1/8轮 · 第1/2组」每 1px 字号要 8.96px 宽度，
   // 去掉「第」后同尺寸屏上字号上限从 39px 抬到 50px。
+  // 轮次 / 组次：上下两行分开显示。
+  // 挤在一行时每 1px 字号要 8~9px 宽度（实测），拆成两行后每行只要 3.6~4.7px，
+  // 于是同样的屏宽能撑起大得多的字号 —— 宽度才是字号的上限。
   if (step.round != null) {
-    let txt = `${step.round}/${config.rounds}轮`;
-    if (config.sets > 1) txt += ` · ${Math.min(step.set, config.sets)}/${config.sets}组`;
-    els.roundLabel.textContent = txt;
+    els.roundLine.textContent = `${step.round}/${config.rounds}轮`;
+    if (config.sets > 1) {
+      els.setLine.textContent = `${Math.min(step.set, config.sets)}/${config.sets}组`;
+      els.setLine.hidden = false;
+    } else {
+      els.setLine.hidden = true;          // 只有一组时没有第二行
+    }
   } else {
-    els.roundLabel.textContent = `共 ${Math.round(totalDuration / 60 * 10) / 10} 分钟`;
+    els.roundLine.textContent = `共 ${Math.round(totalDuration / 60 * 10) / 10} 分钟`;
+    els.setLine.hidden = true;
   }
 
   // "下一个是什么" —— 训练中不用回想
@@ -749,9 +759,10 @@ function renderIdle() {
   els.progressFill.style.width = '0%';
 
   const minutes = Math.round(totalDuration / 60 * 10) / 10;
-  els.roundLabel.textContent = totalDuration > 0
+  els.roundLine.textContent = totalDuration > 0
     ? `共 ${minutes} 分钟 · ${config.rounds} 轮 × ${config.sets} 组`
-    : '— / —';
+    : '—';
+  els.setLine.hidden = true;
 }
 
 function phaseDone() {
@@ -762,7 +773,8 @@ function phaseDone() {
   els.phaseLabel.textContent = '完成';
   els.countdown.textContent  = '🎉';
   els.countdown.classList.remove('urgent');
-  els.roundLabel.textContent = '全部完成';
+  els.roundLine.textContent = '全部完成';
+  els.setLine.hidden = true;
   els.nextLabel.textContent  = '干得漂亮';
   els.progressFill.style.width = '100%';
 }
