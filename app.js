@@ -651,6 +651,53 @@ function setControls(mode) {
   document.body.dataset.run = mode;
 }
 
+/* ------------------------------------------------------------
+   轮次徽章的字号自适应
+   ------------------------------------------------------------
+   徽章宽度随位数剧烈变化。实测在 390px 屏上，每 1px 字号需要的宽度：
+     「8/8轮 · 2/2组」     6.94px   → 字号上限 50px
+     「10/10轮 · 2/2组」   8.08px   → 字号上限 43px
+     「20/20轮 · 10/10组」 9.21px   → 字号上限 38px
+   任何固定字号都会二选一失手：要么窄屏撑破，要么常见配置白白缩小。
+   所以先用 CSS 给的上限试排一次，量出真实宽度，超出就按比例缩回来。
+   每秒只做一次（跟着 render 走），这点排版开销可以忽略。
+   ------------------------------------------------------------ */
+function fitRoundBadge() {
+  const el   = els.roundLabel;
+  const wrap = el.parentElement;
+  if (!wrap) return;
+
+  el.style.fontSize = '';                       // 先回到 CSS 给的上限
+
+  const ws = getComputedStyle(wrap);
+  const avail = wrap.clientWidth
+              - parseFloat(ws.paddingLeft) - parseFloat(ws.paddingRight);
+
+  // 用 Range 量文字自身的排版宽度 —— 不受容器 max-width 影响
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  const textW = range.getBoundingClientRect().width;
+  if (!textW || avail <= 0) return;
+
+  const cs = getComputedStyle(el);
+  const pad    = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+  const border = parseFloat(cs.borderLeftWidth) + parseFloat(cs.borderRightWidth);
+  const maxFs  = parseFloat(cs.fontSize);
+
+  // 各平台字体度量不完全一致（iOS 用 SF Pro / PingFang），所以留 4px 安全间隙
+  const GAP = 4;
+
+  const need = textW + pad + border;
+  // 注意这里是 avail - GAP 而不是 avail：余量不足 GAP 时也要缩，
+  // 否则会出现"刚好差一点没超、于是不缩、只剩 0.9px 余量"的边界情况
+  if (need <= avail - GAP) return;
+
+  // 关键：padding 是 em 单位、随字号一起缩；border 是固定 px、不缩。
+  // 两者混在一起按比例缩放会算不准，必须分开算。
+  const fs = maxFs * (avail - GAP - border) / (textW + pad);
+  el.style.fontSize = `${Math.max(18, fs).toFixed(2)}px`;
+}
+
 function render(step, remaining, elapsed) {
   const meta = PHASE_META[step.phase];
   setAccent(meta.color);
@@ -663,11 +710,13 @@ function render(step, remaining, elapsed) {
   els.countdown.classList.toggle('urgent', remaining <= 3 && step.duration > 3);
 
   // 轮次 / 组次。
-  // 文案刻意收紧（斜杠两侧不留空格、全角空格换成普通中点）——
-  // 这行现在是训练中最显眼的徽章，少占宽度才能放大字号而不撑破窄屏。
+  // 文案压到最紧：不留空格、去掉「第」字（后面的「轮」「组」已经表意），
+  // 只保留中点。宽度就是字号的上限 —— 省下的宽度全部变成字高，
+  // 实测「第1/8轮 · 第1/2组」每 1px 字号要 8.96px 宽度，
+  // 去掉「第」后同尺寸屏上字号上限从 39px 抬到 50px。
   if (step.round != null) {
-    let txt = `第 ${step.round}/${config.rounds} 轮`;
-    if (config.sets > 1) txt += ` · 第 ${Math.min(step.set, config.sets)}/${config.sets} 组`;
+    let txt = `${step.round}/${config.rounds}轮`;
+    if (config.sets > 1) txt += ` · ${Math.min(step.set, config.sets)}/${config.sets}组`;
     els.roundLabel.textContent = txt;
   } else {
     els.roundLabel.textContent = `共 ${Math.round(totalDuration / 60 * 10) / 10} 分钟`;
@@ -682,10 +731,14 @@ function render(step, remaining, elapsed) {
   // 总进度条
   const pct = totalDuration > 0 ? (elapsed / totalDuration) * 100 : 0;
   els.progressFill.style.width = `${Math.min(100, Math.max(0, pct))}%`;
+
+  // 文案定了才能量宽度，所以放在最后
+  fitRoundBadge();
 }
 
 /** 未开始 / 重置后的静态显示 */
 function renderIdle() {
+  els.roundLabel.style.fontSize = '';      // 清掉训练中的自适应字号
   setAccent(PHASE_META.prepare.color);
   document.body.dataset.phase = 'prepare';
 
@@ -702,6 +755,7 @@ function renderIdle() {
 }
 
 function phaseDone() {
+  els.roundLabel.style.fontSize = '';      // 清掉训练中的自适应字号
   setAccent(PHASE_META.done.color);
   document.body.dataset.phase = 'done';
 

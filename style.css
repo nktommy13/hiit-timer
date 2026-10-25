@@ -114,15 +114,18 @@ body {
 body[data-run="running"] .round-badge,
 body[data-run="paused"]  .round-badge,
 body[data-run="done"]    .round-badge {
-  font-size: clamp(26px, 7.2vw, 38px);
+  font-size: clamp(30px, calc(11.4vw - 1px), 46px);
   font-weight: 700;
   color: var(--text);                   /* 不用 accent：倒计时已经是 accent 色，别再抢 */
   background: var(--surface);
   border: 1.5px solid var(--border);
   border-radius: 999px;
-  padding: .16em .72em;                 /* 用 em，跟着字号一起缩放 */
+  /* 内边距用 em 跟着字号缩放；横向刻意压窄 —— 每省下 0.1em
+     就够字号再大一号，而字高才是"一眼找到"的关键 */
+  padding: .13em .56em;
   margin-bottom: 8px;
 }
+
 
 /* ---------- 倒计时主体 ---------- */
 
